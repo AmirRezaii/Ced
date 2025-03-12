@@ -16,6 +16,8 @@ typedef struct {
 typedef struct {
     float x;
     float y;
+    float w;
+    float h;
 } Vec2f;
 
 typedef struct {
@@ -31,6 +33,7 @@ Buffer loadToBuffer(const char *text);
 char *stringFromBuffer(Buffer *buff);
 void buffFree(Buffer *buff);
 
+int addMultilineBeforeCursor(Buffer *buff, const char *text, Cursor *cursor);
 int addTextBeforeCursor(Buffer *buff, const char *text, Cursor cursor);
 void cursorRight(Buffer *buff, Cursor *cursor);
 void cursorLeft(Buffer *buff, Cursor *cursor);
@@ -38,5 +41,8 @@ void cursorUp(Buffer *buff, Cursor *cursor);
 void cursorDown(Buffer *buff, Cursor *cursor);
 void cursorBack(Buffer *buffer, Cursor *cursor);
 int cursorReturn(Buffer *buffer, Cursor *cursor);
+
+char *copyTextSelection(Buffer *buffer, Cursor *select, Cursor *cursor);
+int removeSelection(Buffer *buffer, Cursor *select, Cursor *cursor);
 
 #endif // EDITOR_H_

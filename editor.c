@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdio.h>
 #include "editor.h"
 
 void buffAppend(Buffer *buff, Line line) {
@@ -87,17 +88,6 @@ void buffFree(Buffer *buff) {
 }
 
 
-int addTextBeforeCursor(Buffer *buff, const char *text,Cursor cursor) {
-    Line *cur_line = &buff->lines[cursor.line];
-
-    int input_len = strlen(text);
-
-    memmove(cur_line->text + cursor.col + input_len,
-            cur_line->text + cursor.col, strlen(cur_line->text + cursor.col));
-    strncpy(cur_line->text + cursor.col, text, input_len);
-
-    return input_len;
-}
 
 void cursorRight(Buffer *buff, Cursor *cursor) {
     // TODO: add ability to use ctrl for better contorol
@@ -199,5 +189,182 @@ int cursorReturn(Buffer *buffer, Cursor *cursor) {
         return 0;
 
     cursor->right = cursor->col;
+    return 1;
+}
+
+int addTextBeforeCursor(Buffer *buff, const char *text,Cursor cursor) {
+    Line *cur_line = &buff->lines[cursor.line];
+
+    int input_len = strlen(text);
+
+    memmove(cur_line->text + cursor.col + input_len,
+            cur_line->text + cursor.col, strlen(cur_line->text + cursor.col));
+    strncpy(cur_line->text + cursor.col, text, input_len);
+
+    return input_len;
+}
+
+int addMultilineBeforeCursor(Buffer *buff, const char *text, Cursor *cursor) {
+    size_t i = 0;
+    size_t start = 0;
+    while (text[i] != '\0') {
+        if (text[i] == '\n') {
+            char *line_text = (char *)malloc((i-start)*sizeof(char));
+            memset(line_text, 0, (i - start + 1)*sizeof(char));
+            strncpy(line_text, text+start, i - start);
+            line_text[i-start] = '\0';
+
+            int len = addTextBeforeCursor(buff, line_text, *cursor);
+            cursor->col += len;
+
+            free(line_text);
+
+            start = i + 1;
+
+            cursorReturn(buff, cursor);
+        }
+        i++;
+    }
+
+    char *line_text = (char *)malloc((i - start + 1)*sizeof(char));
+    memset(line_text, 0, (i-start)*sizeof(char));
+    strncpy(line_text, text + start, i - start);
+    line_text[i-start] = '\0';
+
+    int len = addTextBeforeCursor(buff, line_text, *cursor);
+    cursor->col += len;
+    free(line_text);
+
+    return len;
+}
+
+char *copyTextSelection(Buffer *buffer, Cursor *select, Cursor *cursor) {
+    // Get final text size
+    size_t text_size = 0;
+
+    if (select->line == cursor->line) {
+        if (cursor->col > select->col) {
+            text_size = cursor->col - select->col;
+        } else {
+            text_size = select->col - cursor->col;
+        }
+    } else if (select->line < cursor->line) {
+        for (size_t i = select->line + 1; i < cursor->line; ++i) {
+            text_size += strlen(buffer->lines[i].text);
+            // Increase text size for newline
+            text_size++;
+        }
+        text_size += strlen(buffer->lines[select->line].text + select->col);
+        // Increase text size for newline
+        text_size++;
+        text_size += cursor->col;
+    } else {
+        for (size_t i = cursor->line + 1; i < select->line; ++i) {
+            text_size += strlen(buffer->lines[i].text);
+            // Increase text size for newline
+            text_size++;
+        }
+        text_size += strlen(buffer->lines[cursor->line].text + cursor->col);
+        // Increase text size for newline
+        text_size++;
+        text_size += select->col;
+    }
+
+    char *res = (char *)malloc((text_size + 1) * sizeof(char));
+    memset(res, 0, text_size);
+
+    if (select->line == cursor->line) {
+        if (select->col < cursor->col) {
+            strncat(res, buffer->lines[select->line].text + select->col, cursor->col - select->col);
+        } else {
+            strncat(res, buffer->lines[select->line].text + cursor->col, select->col - cursor->col);
+        }
+    } else if (select->line < cursor->line) {
+        strcat(res, buffer->lines[select->line].text + select->col);
+        strcat(res, "\n");
+
+        for (size_t i = select->line + 1; i < cursor->line; ++i) {
+            strcat(res, buffer->lines[i].text);
+            strcat(res, "\n");
+        }
+
+        strncat(res, buffer->lines[cursor->line].text, cursor->col);
+    } else {
+        strcat(res, buffer->lines[cursor->line].text + cursor->col);
+        strcat(res, "\n");
+
+        for (size_t i = cursor->line + 1; i < select->line; ++i) {
+            strcat(res, buffer->lines[i].text);
+            strcat(res, "\n");
+        }
+
+        strncat(res, buffer->lines[select->line].text, select->col);
+    }
+
+    res[text_size] = '\0';
+    return res;
+}
+
+int removeSelection(Buffer *buffer, Cursor *select, Cursor *cursor) {
+    if (select->line == cursor->line) {
+        if (select->col <= cursor->col) {
+            char *line = buffer->lines[select->line].text;
+            char *dest = line + select->col;
+            char *src = line + cursor->col;
+            int n = cursor->col - select->col;
+
+            if (n == 0) return 1;
+
+            memmove(dest, src, strlen(src));
+            char *rest = line + strlen(line) - n;
+            memset(rest, 0, n * sizeof(char));
+        } else {
+            char *line = buffer->lines[cursor->line].text;
+            char *dest = line + cursor->col;
+            char *src = line + select->col;
+            int n = select->col - cursor->col;
+
+            memmove(dest, src, strlen(src));
+            char *rest = line + strlen(line) - n;
+            memset(rest, 0, n);
+        }
+    } else if (select->line < cursor->line) {
+        char *line = buffer->lines[select->line].text;
+        memset(line + select->col, 0, strlen(line) - select->col);
+
+        for (size_t i = select->line + 1; i < cursor->line; ++i) {
+            if (!buffRemove(buffer, i)) return 0;
+        }
+
+        // append rest of the last selection line to first selection line
+        char *rest = buffer->lines[cursor->line].text + cursor->col;
+        strcat(line, rest);
+        if (!buffRemove(buffer, cursor->line)) return 0;
+    } else {
+        char *line = buffer->lines[cursor->line].text;
+        memset(line + cursor->col, 0, strlen(line) - cursor->col);
+
+        for (size_t i = cursor->line + 1; i < select->line; ++i) {
+            if (!buffRemove(buffer, i)) return 0;
+        }
+
+        // append rest of the last selection line to first selection line
+        char *rest = buffer->lines[select->line].text + select->col;
+        strcat(line, rest);
+        if (!buffRemove(buffer, select->line)) return 0;
+    }
+
+    // Place cursor in right place after removal of text
+    if (cursor->line == select->line) {
+        if (cursor->col > select->col) {
+            cursor->col = select->col;
+            cursor->right = select->col;
+        }
+    } else if (cursor->line > select->line) {
+        cursor->line = select->line;
+        cursor->col = select->col;
+        cursor->right = select->col;
+    }
+
     return 1;
 }
